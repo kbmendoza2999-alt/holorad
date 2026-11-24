@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;background:#07111c;color:#e4f1f7;font:14px/1.45 system-ui,Segoe UI,sans-serif}
+.shell{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:12px;align-items:start}
+.stage{border:1px solid #24445a;border-radius:13px;overflow:hidden;background:#06111c;min-width:0}
+.stagebar{display:flex;justify-content:space-between;align-items:center;padding:10px 13px;background:#0b1b29;border-bottom:1px solid #24445a;gap:8px}
+.kicker{color:#57d8ef;font-size:10px;letter-spacing:.15em;text-transform:uppercase}
+#view{height:650px;width:100%;display:block;touch-action:none;cursor:grab}
+#view:active{cursor:grabbing}
+.toolbar{display:flex;flex-wrap:wrap;gap:6px;padding:10px;background:#0b1b29;border-top:1px solid #24445a}
+button{background:#142c3e;border:1px solid #31556d;color:#d8edf5;border-radius:7px;padding:8px 10px;font-size:12px;cursor:pointer}
+button:hover,button.active{background:#124157;border-color:#57d8ef;color:white}
+aside{display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel{background:linear-gradient(145deg,#102333,#0b1926);border:1px solid #24445a;border-radius:11px;padding:12px}
+.panel h3{color:#57d8ef;font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 9px}
+#partTitle{font-size:17px;font-weight:750;margin:2px 0 7px}
+#partDesc{color:#b2c6d2;font-size:12px;min-height:80px}
+.meta{font-size:11px;color:#91aabd;border-top:1px solid #244052;padding-top:8px;margin-top:9px}
+.range{width:100%;accent-color:#57d8ef;margin:8px 0 14px}
+.directory{display:grid;grid-template-columns:1fr 1fr;gap:5px;max-height:260px;overflow:auto}
+.directory button{text-align:left;padding:7px;font-size:11px}
+.directory button.active{border-color:#57d8ef;background:#124157}
+.legend{color:#91aabd;font-size:11px;margin:8px 12px 11px}
+#labelLayer{position:absolute;inset:44px 0 56px;pointer-events:none;overflow:hidden}
+.label{position:absolute;transform:translate(13px,-50%);padding:7px 9px;border:1px solid #63e7ff;border-radius:7px;background:#061925ed;color:#e8fbff;font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 0 18px #22c9ee55}
+.label:before{content:"";position:absolute;right:100%;top:50%;width:24px;border-top:1px solid #63e7ff}
+.label small{display:block;color:#75d9eb;font-size:9px;text-transform:uppercase;letter-spacing:.1em;font-weight:500}
+.viewport{position:relative}
+.note{font-size:10px;color:#8299a8;padding:9px 2px}
+@media(max-width:850px){.shell{grid-template-columns:1fr}aside{display:grid;grid-template-columns:1fr 1fr}.directoryPanel{grid-column:1/-1}#view{height:570px}}
+@media(max-width:560px){aside{display:flex}#view{height:470px}.stagebar .hint{display:none}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+<div class="shell">
+ <section class="stage">
+  <div class="stagebar"><div><div class="kicker">Interactive 3D environment</div><strong id="viewLabel">Full clinical room</strong></div><span class="kicker hint">Drag · Scroll · Select</span></div>
+  <div class="viewport"><canvas id="view"></canvas><div id="labelLayer"><div class="label" id="partLabel">X-ray tube housing<small>Selected component</small></div></div></div>
+  <div class="toolbar">
+   <button class="active" data-mode="room">Full room</button><button data-mode="machine">Machine focus</button><button data-mode="exploded">Tube exploded view</button><button data-mode="cutaway">Cutaway</button><button id="reset">Reset camera</button>
+  </div>
+  <div class="legend">Drag to rotate · Scroll to zoom · Click a component or choose it from the directory</div>
+ </section>
+ <aside>
+  <section class="panel"><h3>Component inspection</h3><div id="partTitle">X-ray tube housing</div><div id="partDesc">Select a component in the scene or directory.</div><div class="meta" id="partMeta">Category: Tube assembly</div></section>
+  <section class="panel"><h3>Scene controls</h3><label class="kicker">Explode distance</label><input class="range" id="explode" type="range" min="0" max="100" value="0"><label class="kicker">Room visibility</label><input class="range" id="roomOpacity" type="range" min="0" max="100" value="100"><button id="isolate">Isolate selected</button> <button id="showAll">Show all</button></section>
+  <section class="panel directoryPanel"><h3>Equipment directory</h3><div class="directory" id="directory"></div></section>
+ </aside>
+</div>
+<div class="note">Conceptual educational model only. Not manufacturer CAD, not engineering scale, and does not generate X-rays.</div>
+<script>
+(()=>{
+const canvas=document.getElementById('view'),label=document.getElementById('partLabel');
+if(!window.THREE){document.getElementById('partDesc').textContent='3D library could not load. Check your internet connection.';return;}
+const THREE=window.THREE;
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(canvas.clientWidth,canvas.clientHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();scene.background=new THREE.Color('#081522');scene.fog=new THREE.Fog('#081522',18,38);
+const camera=new THREE.PerspectiveCamera(42,canvas.clientWidth/canvas.clientHeight,.1,100);camera.position.set(10,9,12);
+const controls=new THREE.OrbitControls(camera,canvas);controls.target.set(0,2.5,0);controls.enableDamping=true;controls.maxPolarAngle=Math.PI*.49;controls.minDistance=5;controls.maxDistance=27;
+scene.add(new THREE.HemisphereLight(0xbad9ed,0x253544,1.8));
+const key=new THREE.DirectionalLight(0xe4f4ff,2.5);key.position.set(6,12,8);key.castShadow=true;key.shadow.mapSize.set(2048,2048);scene.add(key);
+const fill=new THREE.PointLight(0x3cbad5,18,20);fill.position.set(-5,6,-3);scene.add(fill);
+const mat={
+ floor:new THREE.MeshStandardMaterial({color:'#344754',roughness:.8}),wall:new THREE.MeshStandardMaterial({color:'#203543',roughness:.9}),
+ white:new THREE.MeshStandardMaterial({color:'#d5e0e5',metalness:.18,roughness:.35}),metal:new THREE.MeshStandardMaterial({color:'#718894',metalness:.7,roughness:.3}),
+ dark:new THREE.MeshStandardMaterial({color:'#263c49',metalness:.35,roughness:.55}),blue:new THREE.MeshStandardMaterial({color:'#5b8294',metalness:.25,roughness:.35}),
+ glass:new THREE.MeshStandardMaterial({color:'#74b5c7',metalness:.1,roughness:.12,transparent:true,opacity:.38,depthWrite:false}),
+ glow:new THREE.MeshStandardMaterial({color:'#4bd9ef',emissive:'#126b82',emissiveIntensity:1.2})
+};
+const groups={},pickables=[];
+function group(id,name,desc,cat){let g=new THREE.Group();g.userData={id,name,desc,cat};scene.add(g);groups[id]=g;return g;}
+function add(g,geo,material,pos){let m=new THREE.Mesh(geo,material);m.position.set(...pos);m.castShadow=true;m.receiveShadow=true;m.userData.owner=g.userData.id;g.add(m);pickables.push(m);return m;}
+function box(g,ma,p,s){return add(g,new THREE.BoxGeometry(...s),ma,p);}
+function cyl(g,ma,p,r1,r2,h,n=32){return add(g,new THREE.CylinderGeometry(r1,r2,h,n),ma,p);}
+function cylX(g,ma,p,r,h){let m=cyl(g,ma,p,r,r,h);m.rotation.z=Math.PI/2;return m;}
+function rod(g,a,b,r,ma){let A=new THREE.Vector3(...a),B=new THREE.Vector3(...b),d=B.clone().sub(A),m=cyl(g,ma,A.clone().add(B).multiplyScalar(.5).toArray(),r,r,d.length(),16);m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize());return m;}
+// Room architecture
+const room=new THREE.Group();scene.add(room);
+box(room,mat.floor,[0,-.12,0],[16,.25,13]);box(room,mat.wall,[0,3.2,-6.45],[16,6.5,.25]);box(room,mat.wall,[-8,3.2,0],[.25,6.5,13]);box(room,mat.wall,[8,3.2,0],[.25,6.5,13]);
+for(let x=-7;x<=7;x+=1)for(let z=-6;z<=6;z+=1)box(room,mat.metal,[x,.012,z],[.012,.008,.012]);
+box(room,mat.glass,[-3.7,3.2,-6.28],[3,.03,1.6]);box(room,mat.metal,[-3.7,3.2,-6.3],[3.1,.1,1.7]);box(room,mat.dark,[5.4,1.5,-6.25],[2,.1,3]);
+for(let x=-5;x<=5;x+=5)box(room,mat.glow,[x,6.35,0],[2.2,.04,.65]);
+// Tube suspension
+const rails=group('rails','Ceiling track system','Overhead rails support longitudinal and transverse tube travel, allowing alignment over the table or upright receptor.','Room infrastructure');
+box(rails,mat.metal,[0,6.08,0],[.22,.18,10]);box(rails,mat.metal,[0,6.08,0],[9,.18,.22]);
+const arm=group('arm','Ceiling suspension arm','Supports the tube assembly and provides multi-axis positioning above the table or wall receptor.','Mechanical support');
+box(arm,mat.dark,[0,5.82,0],[1,.25,.8]);box(arm,mat.metal,[0,5.1,0],[.22,1.25,.22]);box(arm,mat.white,[0,4.35,0],[1.8,.18,.22]);rod(arm,[-.75,4.35,0],[-.75,3.8,0],.09,mat.metal);
+// Tube outer housing and internals, arranged on a left-to-right axis.
+const tube=group('tube','X-ray tube housing','Protective metal enclosure surrounds the evacuated glass envelope and insulating oil. It provides electrical insulation, heat transfer and radiation shielding.','Tube housing');
+tube.position.set(0,3.75,0);box(tube,mat.white,[0,.56,0],[3.25,.18,1.02]);box(tube,mat.white,[0,-.56,0],[3.25,.18,1.02]);box(tube,mat.metal,[-1.58,0,0],[.16,.95,1.02]);box(tube,mat.metal,[1.58,0,0],[.16,.95,1.02]);
+const insert=group('insert','Glass envelope','The evacuated glass envelope maintains the vacuum required for electron movement between cathode and anode.','Tube insert');insert.position.set(0,3.75,0);cylX(insert,mat.glass,[0,0,0],.39,2.85);
+const stator=group('stator','Stator','Stationary electromagnetic coils outside the glass envelope create the rotating magnetic field that drives the rotor.','Induction motor');stator.position.set(0,3.75,0);cylX(stator,mat.metal,[-.92,.56,0],.28,.72);cylX(stator,mat.metal,[-.92,-.56,0],.28,.72);
+const rotor=group('rotor','Rotor','Located inside the evacuated envelope and connected to the anode stem, the rotor turns in response to the stator magnetic field.','Induction motor');rotor.position.set(0,3.75,0);cylX(rotor,mat.dark,[-.88,0,0],.17,.48);
+const stem=group('stem','Anode stem','Connects the rotor to the anode disk and transmits rotation to the target assembly.','Anode assembly');stem.position.set(0,3.75,0);cylX(stem,mat.metal,[-.1,0,0],.075,1.75);
+const anode=group('anode','Tungsten/rhenium anode disk','The rotating target disk contains a tungsten/rhenium focal track. Rotation spreads heat over a larger target track.','Anode assembly');anode.position.set(0,3.75,0);cylX(anode,mat.metal,[.78,0,0],.48,.12);cylX(anode,mat.white,[.78,0,0],.12,.16);
+const cathode=group('cathode','Cathode','The cathode assembly is opposite the anode and contains the filament and focusing cup that shape the electron stream.','Cathode assembly');cathode.position.set(0,3.75,0);cylX(cathode,mat.metal,[1.18,0,0],.29,.66);
+const cup=group('cup','Focusing cup','Surrounds the filament and electrostatically directs emitted electrons toward the anode focal track.','Cathode assembly');cup.position.set(0,3.75,0);box(cup,mat.metal,[1,-.16,0],[.48,.12,.34]);box(cup,mat.metal,[1,.16,0],[.48,.12,.34]);
+const filament=group('filament','Filament in focusing cup','The heated filament emits electrons by thermionic emission and is positioned within the focusing cup.','Cathode assembly');filament.position.set(0,3.75,0);rod(filament,[1.13,-.04,0],[1.13,.04,0],.035,mat.glow);
+const port=group('port','Tube port','Opening through which the useful X-ray beam exits the housing toward the collimator.','Beam exit');port.position.set(0,3.75,0);box(port,mat.dark,[0,-.64,.05],[.55,.12,.42]);box(port,mat.glow,[0,-.72,.05],[.22,.025,.22]);
+// Collimator
+const collimator=group('collimator','Light-beam collimator','Adjustable shutters restrict the X-ray field. The light field helps align the exposure field with the anatomy and detector.','Beam limitation');box(collimator,mat.dark,[0,3.12,.1],[.62,.3,.62]);box(collimator,mat.metal,[0,2.92,.1],[.48,.1,.48]);box(collimator,mat.glow,[0,2.85,.1],[.25,.025,.25]);
+// Table and receptor
+const table=group('table','Radiographic table','Radiolucent tabletop supports the patient and permits positioning for a range of projections.','Patient support');box(table,mat.dark,[0,1.15,0],[2.1,.75,1.5]);box(table,mat.metal,[0,1.72,0],[.35,.85,.4]);box(table,mat.white,[0,2.2,0],[4.4,.16,1.55]);box(table,mat.blue,[0,2.3,0],[4.1,.035,1.35]);
+const bucky=group('bucky','Table Bucky tray','Under-table assembly houses the image receptor and may incorporate a moving anti-scatter grid.','Image receptor');box(bucky,mat.dark,[0,1.92,0],[1.45,.18,1.1]);
+const grid=group('grid','Anti-scatter grid','Preferentially transmits primary radiation while absorbing a portion of scatter reaching the receptor.','Image receptor');box(grid,mat.metal,[0,1.78,0],[1.05,.025,.8]);
+const wallstand=group('wallstand','Upright wall bucky','Vertical receptor stand for erect chest, abdomen and extremity examinations.','Image receptor');box(wallstand,mat.metal,[-5,2.5,-5.6],[.25,3.5,.35]);box(wallstand,mat.white,[-5,2.8,-5.32],[1.15,2.5,.18]);
+const wallpanel=group('wallpanel','Wall detector panel','Digital receptor captures remnant radiation after it passes through the patient.','Digital imaging');box(wallpanel,mat.blue,[-5,2.8,-5.2],[.95,2.25,.07]);
+const generator=group('generator','High-voltage generator','Supplies controlled electrical power to the tube and regulates tube potential and current.','Electrical system');box(generator,mat.dark,[5.8,1.3,-3.5],[1.1,2.3,.9]);box(generator,mat.glow,[5.8,1.8,-3.02],[.65,.45,.025]);
+const consoleG=group('console','Operator control console','Used to select examinations and exposure factors such as kVp, mA and exposure time.','Operator area');box(consoleG,mat.dark,[5.7,1,-5.3],[1.4,1.6,.8]);box(consoleG,mat.metal,[5.7,1.9,-5.3],[1.5,.12,.9]);box(consoleG,mat.glow,[5.7,2.35,-5.25],[1.1,.72,.08]);
+const booth=group('booth','Lead-glass control booth','Protected operator area provides a view of the patient while maintaining a radiation-protective barrier.','Room infrastructure');box(booth,mat.glass,[3.2,2.8,-6.25],[2.4,1.7,.08]);
+const phantom=group('phantom','Positioning phantom','Teaching phantom for demonstrations of centering, collimation, detector alignment and projection geometry.','Clinical positioning');cyl(phantom,mat.white,[0,2.48,0],.23,.23,.35);let torso=add(phantom,new THREE.CapsuleGeometry(.32,.95,8,16),mat.white,[0,2.95,0]);torso.rotation.z=Math.PI/2;
+const allGroups=Object.values(groups);
+let active='tube',isolated=false,mode='room';
+const directory=document.getElementById('directory');
+allGroups.forEach(g=>{let b=document.createElement('button');b.textContent=g.userData.name;b.dataset.id=g.userData.id;b.onclick=()=>select(g.userData.id);directory.appendChild(b);});
+function updateSelection(){
+ allGroups.forEach(g=>g.traverse(o=>{if(!o.isMesh)return;if(!o.userData.baseMat){o.userData.baseMat=o.material;let h=o.material.clone();if(h.emissive){h.emissive=new THREE.Color('#00bfe8');h.emissiveIntensity=0;}o.userData.hiMat=h;}
+ const chosen=g.userData.id===active,material=o.userData.hiMat;material.transparent=!chosen;material.opacity=chosen?1:.19;material.depthWrite=chosen;if(material.emissive)material.emissiveIntensity=chosen?1.25:0;o.material=material;}));
+ const g=groups[active];document.getElementById('partTitle').textContent=g.userData.name;document.getElementById('partDesc').textContent=g.userData.desc;document.getElementById('partMeta').textContent='Category: '+g.userData.cat;
+ document.querySelectorAll('.directory button').forEach(b=>b.classList.toggle('active',b.dataset.id===active));
+ label.innerHTML=g.userData.name+'<small>Selected component</small>';
+}
+function select(id){if(!groups[id])return;active=id;updateSelection();updateLabel();}
+function updateLabel(){
+ const g=groups[active];if(!g)return;const bounds=new THREE.Box3().setFromObject(g),v=bounds.getCenter(new THREE.Vector3());v.x+=Math.max(.35,bounds.getSize(new THREE.Vector3()).x*.5);v.project(camera);
+ const x=(v.x*.5+.5)*canvas.clientWidth,y=(-v.y*.5+.5)*canvas.clientHeight;
+ const visible=v.z>-1&&v.z<1&&x>5&&x<canvas.clientWidth-20&&y>5&&y<canvas.clientHeight-5;
+ label.style.display=visible?'block':'none';if(visible){label.style.left=Math.min(x,canvas.clientWidth-195)+'px';label.style.top=Math.max(15,Math.min(y,canvas.clientHeight-15))+'px';}
+}
+function setExplode(t){
+ tube.position.set(0,3.75,0);insert.position.set(0,3.75+t*.12,0);stator.position.set(-t*.55,3.75,0);rotor.position.set(-t*.95,3.75,0);stem.position.set(-t*.25,3.75+t*.35,0);anode.position.set(t*.55,3.75+t*.65,0);cathode.position.set(t*.95,3.75,0);cup.position.set(t*1.15,3.75-t*.35,0);filament.position.set(t*1.4,3.75-t*.65,0);port.position.set(0,3.75-t*.9,0);collimator.position.y=-t*.5;
+}
+function setMode(m){mode=m;document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));document.getElementById('viewLabel').textContent=({room:'Full clinical room',machine:'Machine focus',exploded:'X-ray tube exploded assembly',cutaway:'Tube cutaway'})[m];room.visible=m!=='machine';if(m==='exploded'&&+document.getElementById('explode').value===0){document.getElementById('explode').value=65;setExplode(.65);}if(m!=='exploded'){document.getElementById('explode').value=0;setExplode(0);}}
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+document.getElementById('reset').onclick=()=>{camera.position.set(10,9,12);controls.target.set(0,2.5,0);controls.update();document.getElementById('explode').value=0;setExplode(0);setMode('room');};
+document.getElementById('explode').oninput=e=>setExplode(+e.target.value/100);
+document.getElementById('roomOpacity').oninput=e=>{let opacity=+e.target.value/100;room.traverse(o=>{if(o.isMesh){o.material.transparent=opacity<1;o.material.opacity=opacity;}});};
+document.getElementById('isolate').onclick=()=>{isolated=true;allGroups.forEach(g=>g.visible=g.userData.id===active);room.visible=false;};
+document.getElementById('showAll').onclick=()=>{isolated=false;allGroups.forEach(g=>g.visible=true);room.visible=mode!=='machine';updateSelection();};
+const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();let down=null;
+canvas.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY];});
+canvas.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5){down=null;return;}down=null;const r=canvas.getBoundingClientRect();pointer.x=((e.clientX-r.left)/r.width)*2-1;pointer.y=-((e.clientY-r.top)/r.height)*2+1;ray.setFromCamera(pointer,camera);const hit=ray.intersectObjects(pickables,true)[0];if(hit&&hit.object.userData.owner)select(hit.object.userData.owner);});
+function resize(){const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+new ResizeObserver(resize).observe(canvas);resize();select('tube');
+function animate(){requestAnimationFrame(animate);controls.update();updateLabel();renderer.render(scene,camera);}animate();
+})();
+</script>
+</body>
+</html>
